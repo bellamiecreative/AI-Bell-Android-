@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#212121">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AI Bell">
+  <title>AI Bell</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar" aria-label="Chat history">
+      <div class="side-top">
+        <button id="closeSidebar" class="icon-btn" type="button" aria-label="Close menu">×</button>
+        <button id="new-chat" class="new-chat" type="button">＋ New chat</button>
+      </div>
+      <div id="chat-list" class="history"></div>
+      <div class="side-bottom">
+        <div class="brand-mini"><span class="bell">●</span> AI Bell</div>
+        <button id="delete-chat" class="danger-btn" type="button">Delete current chat</button>
+      </div>
+    </aside>
+
+    <div id="scrim" class="scrim" aria-hidden="true"></div>
+
+    <div class="ai-toolbar">
+      <button id="load-ai" class="ai-load" type="button">Load AI</button>
+      <span id="ai-status" class="ai-status">AI not loaded</span>
+    </div>
+
+    <main class="main">
+      <header class="header">
+        <button id="openSidebar" class="icon-btn" type="button" aria-label="Open menu">☰</button>
+        <div class="title">AI Bell</div>
+        <button id="new-chat-top" class="icon-btn" type="button" aria-label="New chat">＋</button>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <form id="composer" class="composer-wrap" novalidate>
+        <div class="composer">
+          <textarea id="message-input" rows="1" placeholder="Message AI Bell..." autocomplete="off"></textarea>
+          <button id="send-btn" class="send" type="submit" aria-label="Send">↑</button>
+        </div>
+        <div class="hint">AI Bell can make mistakes. Check important information.</div>
+      </form>
+    </main>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
