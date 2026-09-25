@@ -27,6 +27,11 @@ jobs:
       - name: Build APK
         run: gradle assembleDebug
 
+      - name: Inspect APK
+        run: |
+          ls -lh app/build/outputs/apk/debug/
+          unzip -l app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
