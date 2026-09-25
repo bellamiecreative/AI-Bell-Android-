@@ -1,137 +1,503 @@
-// AI Bell v8 — iPhone CPU/WASM chat
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
 
 const MODEL_ID = "onnx-community/SmolLM2-135M-Instruct-ONNX";
-const STORAGE_KEY = "ai-bell-chats-v8";
+const STORAGE_KEY = "ai-bell-chats-v9";
 
-let generator = null, loading = false, generating = false;
-let chats = loadChats(), activeChatId = null;
+let ai = null;
+let loading = false;
+let thinking = false;
+
+let chats = loadChats();
+let activeChatId = null;
+
 const $ = id => document.getElementById(id);
 
-function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
-function loadChats(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]}catch{return[]}}
-function saveChats(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(chats))}catch{}}
-function currentChat(){return chats.find(c=>c.id===activeChatId)}
-function ensureChat(){
-  if(!activeChatId||!currentChat()){
-    const c={id:uid(),title:"New chat",messages:[],updatedAt:Date.now()};
-    chats.unshift(c);activeChatId=c.id;saveChats();
+function id() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function loadChats() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch {
+    return [];
   }
 }
-function setStatus(t,type=""){const e=$("ai-status");if(e){e.textContent=t;e.className="ai-status "+type}}
-function cleanAnswer(t){
-  return String(t||"").replace(/<think>[\s\S]*?<\/think>/gi,"")
-    .replace(/<think>[\s\S]*$/gi,"").trim();
+
+function saveChats() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+  } catch {}
 }
-function renderChats(){
-  const list=$("chat-list");if(!list)return;list.innerHTML="";
-  for(const c of chats){
-    const b=document.createElement("button");b.type="button";
-    b.className="chat-item"+(c.id===activeChatId?" active":"");
-    b.textContent=c.title||"New chat";
-    b.onclick=()=>{activeChatId=c.id;closeSidebar();renderAll()};
-    list.appendChild(b);
+
+function currentChat() {
+  return chats.find(c => c.id === activeChatId);
+}
+
+function ensureChat() {
+  if (!activeChatId || !currentChat()) {
+    const chat = {
+      id: id(),
+      title: "New chat",
+      messages: [],
+      updatedAt: Date.now()
+    };
+
+    chats.unshift(chat);
+    activeChatId = chat.id;
+    saveChats();
   }
 }
-function renderMessages(){
-  const box=$("messages");if(!box)return;box.innerHTML="";
-  const c=currentChat();
-  if(!c||!c.messages.length){
-    const w=document.createElement("div");w.className="welcome";
-    w.innerHTML='<div class="welcome-logo">AI</div><h1>How can I help?</h1><p>AI Bell runs a small AI model locally on this device.</p><div class="local-note">🔒 Your messages stay on this device.</div>';
-    box.appendChild(w);return;
-  }
-  for(const m of c.messages){
-    const row=document.createElement("div");row.className="message "+m.role;
-    const bubble=document.createElement("div");bubble.className="bubble";
-    bubble.textContent=m.role==="assistant"?cleanAnswer(m.content):m.content;
-    row.appendChild(bubble);box.appendChild(row);
-  }
-  box.scrollTop=box.scrollHeight;
+
+function status(text, type = "") {
+  const el = $("ai-status");
+  if (!el) return;
+
+  el.textContent = text;
+  el.className = "ai-status " + type;
 }
-function updateModelUI(){
-  const b=$("load-ai");if(!b)return;
-  if(generator){b.textContent="AI Ready";b.disabled=false;setStatus("Local AI ready","ready")}
-  else if(loading){b.textContent="Loading AI…";b.disabled=true}
-  else{b.textContent="Load AI";b.disabled=false;if(!$("ai-status")?.classList.contains("error"))setStatus("AI not loaded","")}
+
+function clean(text) {
+  return String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
+    .trim();
 }
-async function loadAI(){
-  if(generator||loading)return;
-  loading=true;updateModelUI();setStatus("Preparing local AI…","");
-  try{
-    generator=await pipeline("text-generation",MODEL_ID,{
-      device:"wasm",dtype:"q4f16",
-      progress_callback:p=>{
-        if(typeof p?.progress==="number"){
-          const pct=Math.max(0,Math.min(100,Math.round(p.progress<=1?p.progress*100:p.progress)));
-          setStatus(`Loading local AI… ${pct}%`,"");
-        }else if(p?.status==="initiate")setStatus("Preparing local AI…","");
-      }
+
+function renderChats() {
+  const list = $("chat-list");
+  if (!list) return;
+
+  list.innerHTML = "";
+
+  chats.forEach(chat => {
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className =
+      "chat-item" + (chat.id === activeChatId ? " active" : "");
+
+    button.textContent = chat.title || "New chat";
+
+    button.addEventListener("click", () => {
+      activeChatId = chat.id;
+      closeSidebar();
+      renderAll();
     });
-    setStatus("Local AI ready","ready");
-  }catch(e){console.error(e);generator=null;setStatus("AI could not load. Try again.","error")}
-  finally{loading=false;updateModelUI()}
+
+    list.appendChild(button);
+  });
 }
-function systemPrompt(){
-  return "You are AI Bell, a helpful private AI assistant. Answer clearly and naturally. The user may write Sorani Kurdish, Kurmanji Kurdish, Arabic, or English. If the user writes Sorani Kurdish, answer in Sorani Kurdish when possible. Do not reveal hidden reasoning. Keep answers concise.";
-}
-function makePrompt(messages){
-  // Explicit ChatML avoids browser/model chat-template compatibility problems.
-  let p="<|im_start|>system\n"+systemPrompt()+"<|im_end|>\n";
-  for(const m of messages){
-    p+="<|im_start|>"+m.role+"\n"+m.content+"<|im_end|>\n";
+
+function renderMessages() {
+  const box = $("messages");
+  if (!box) return;
+
+  box.innerHTML = "";
+
+  const chat = currentChat();
+
+  if (!chat || chat.messages.length === 0) {
+    const welcome = document.createElement("div");
+
+    welcome.className = "welcome";
+
+    welcome.innerHTML = `
+      <div class="welcome-logo">AI</div>
+      <h1>How can I help?</h1>
+      <p>AI Bell runs AI locally on this device.</p>
+      <div class="local-note">🔒 Your chats stay on this device.</div>
+    `;
+
+    box.appendChild(welcome);
+    return;
   }
-  p+="<|im_start|>assistant\n";
-  return p;
+
+  chat.messages.forEach(message => {
+    const row = document.createElement("div");
+    row.className = "message " + message.role;
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    bubble.textContent =
+      message.role === "assistant"
+        ? clean(message.content)
+        : message.content;
+
+    row.appendChild(bubble);
+    box.appendChild(row);
+  });
+
+  box.scrollTop = box.scrollHeight;
 }
-function extractAnswer(output,prompt){
-  let s="";
-  if(Array.isArray(output)&&output[0])s=typeof output[0].generated_text==="string"?output[0].generated_text:"";
-  else if(typeof output==="string")s=output;
-  if(s.startsWith(prompt))s=s.slice(prompt.length);
-  s=s.replace(/<\|im_end\|>[\s\S]*$/,"").replace(/<\|im_start\|>assistant\s*/g,"");
-  return cleanAnswer(s);
+
+function updateAIButton() {
+  const button = $("load-ai");
+  if (!button) return;
+
+  if (ai) {
+    button.textContent = "AI Ready";
+    button.disabled = false;
+    status("Local AI ready", "ready");
+  } else if (loading) {
+    button.textContent = "Loading AI…";
+    button.disabled = true;
+  } else {
+    button.textContent = "Load AI";
+    button.disabled = false;
+  }
 }
-async function sendMessage(){
-  if(generating)return;
-  const input=$("message-input"),text=(input?.value||"").trim();
-  if(!text)return;
+
+async function loadAI() {
+  if (ai || loading) return;
+
+  loading = true;
+  updateAIButton();
+
+  status("Starting AI…");
+
+  try {
+    ai = await pipeline(
+      "text-generation",
+      MODEL_ID,
+      {
+        device: "wasm",
+        dtype: "q4f16",
+        progress_callback: data => {
+          if (typeof data?.progress === "number") {
+            let percent = data.progress;
+
+            if (percent <= 1) {
+              percent *= 100;
+            }
+
+            percent = Math.round(
+              Math.max(0, Math.min(100, percent))
+            );
+
+            status(`Loading AI… ${percent}%`);
+          }
+        }
+      }
+    );
+
+    status("Local AI ready", "ready");
+    updateAIButton();
+
+  } catch (error) {
+    console.error(error);
+
+    ai = null;
+
+    status(
+      "AI could not load. Check internet and try again.",
+      "error"
+    );
+
+    alert(
+      "AI could not load.\n\nMake sure the phone has internet access, then press Load AI again."
+    );
+  }
+
+  loading = false;
+  updateAIButton();
+}
+
+function systemPrompt() {
+  return `
+You are AI Bell, a helpful personal AI assistant.
+
+The user may speak:
+- English
+- Sorani Kurdish
+- Arabic
+
+If the user writes Sorani Kurdish, answer in Sorani Kurdish.
+
+Be helpful, clear and natural.
+
+Do not reveal hidden reasoning.
+
+Keep answers reasonably concise.
+`;
+}
+
+function buildPrompt(messages) {
+  let prompt =
+    "<|im_start|>system\n" +
+    systemPrompt() +
+    "<|im_end|>\n";
+
+  for (const message of messages) {
+    prompt +=
+      "<|im_start|>" +
+      message.role +
+      "\n" +
+      message.content +
+      "<|im_end|>\n";
+  }
+
+  prompt += "<|im_start|>assistant\n";
+
+  return prompt;
+}
+
+function getAnswer(result, prompt) {
+  let text = "";
+
+  if (Array.isArray(result) && result[0]) {
+    text =
+      typeof result[0].generated_text === "string"
+        ? result[0].generated_text
+        : "";
+  }
+
+  if (typeof result === "string") {
+    text = result;
+  }
+
+  if (text.startsWith(prompt)) {
+    text = text.substring(prompt.length);
+  }
+
+  text = text
+    .replace(/<\|im_end\|>[\s\S]*$/g, "")
+    .replace(/<\|im_start\|>assistant\s*/g, "");
+
+  return clean(text);
+}
+
+async function sendMessage() {
+  if (thinking) return;
+
+  const input = $("message-input");
+
+  if (!input) return;
+
+  const text = input.value.trim();
+
+  if (!text) return;
+
   ensureChat();
-  if(!generator){await loadAI();if(!generator)return}
-  const c=currentChat();input.value="";input.style.height="auto";
-  c.messages.push({role:"user",content:text});
-  if(c.title==="New chat")c.title=text.slice(0,32)+(text.length>32?"…":"");
-  c.updatedAt=Date.now();saveChats();renderAll();
-  generating=true;$("send-btn").disabled=true;setStatus("AI is thinking…","ready");
-  try{
-    const history=c.messages.slice(-8);
-    const prompt=makePrompt(history);
-    const output=await generator(prompt,{max_new_tokens:96,do_sample:false,repetition_penalty:1.05});
-    let answer=extractAnswer(output,prompt);
-    if(!answer)answer="I couldn't generate a response. Please try again.";
-    c.messages.push({role:"assistant",content:answer});
-    c.updatedAt=Date.now();saveChats();renderMessages();
-  }catch(e){
-    console.error("Generation error:",e);
-    // Keep the user's message visible; show a useful error instead of deleting it.
-    c.messages.push({role:"assistant",content:"Sorry — the local AI could not generate a response on this iPhone. Please try again."});
-    saveChats();renderMessages();
-  }finally{generating=false;$("send-btn").disabled=false;setStatus("Local AI ready","ready")}
+
+  if (!ai) {
+    await loadAI();
+
+    if (!ai) return;
+  }
+
+  const chat = currentChat();
+
+  input.value = "";
+  input.style.height = "auto";
+
+  chat.messages.push({
+    role: "user",
+    content: text
+  });
+
+  if (chat.title === "New chat") {
+    chat.title =
+      text.length > 32
+        ? text.substring(0, 32) + "…"
+        : text;
+  }
+
+  chat.updatedAt = Date.now();
+
+  saveChats();
+  renderAll();
+
+  thinking = true;
+
+  const sendButton = $("send-btn");
+
+  if (sendButton) {
+    sendButton.disabled = true;
+  }
+
+  status("AI is thinking…", "ready");
+
+  try {
+    const history = chat.messages.slice(-8);
+
+    const prompt = buildPrompt(history);
+
+    const result = await ai(prompt, {
+      max_new_tokens: 128,
+      do_sample: false,
+      repetition_penalty: 1.05
+    });
+
+    let answer = getAnswer(result, prompt);
+
+    if (!answer) {
+      answer =
+        "I couldn't generate a response. Please try again.";
+    }
+
+    chat.messages.push({
+      role: "assistant",
+      content: answer
+    });
+
+    chat.updatedAt = Date.now();
+
+    saveChats();
+    renderMessages();
+
+  } catch (error) {
+    console.error("AI generation error:", error);
+
+    chat.messages.push({
+      role: "assistant",
+      content:
+        "Sorry, the AI could not generate a response. Please try again."
+    });
+
+    saveChats();
+    renderMessages();
+
+  } finally {
+    thinking = false;
+
+    if (sendButton) {
+      sendButton.disabled = false;
+    }
+
+    status("Local AI ready", "ready");
+  }
 }
-function newChat(){const c={id:uid(),title:"New chat",messages:[],updatedAt:Date.now()};chats.unshift(c);activeChatId=c.id;saveChats();closeSidebar();renderAll();$("message-input")?.focus()}
-function deleteCurrentChat(){if(!activeChatId)return;chats=chats.filter(c=>c.id!==activeChatId);activeChatId=chats[0]?.id||null;saveChats();ensureChat();renderAll()}
-function openSidebar(){$("sidebar")?.classList.add("open");$("scrim")?.classList.add("show")}
-function closeSidebar(){$("sidebar")?.classList.remove("open");$("scrim")?.classList.remove("show")}
-function autoResize(){const i=$("message-input");if(i){i.style.height="auto";i.style.height=Math.min(i.scrollHeight,130)+"px"}}
-function renderAll(){renderChats();renderMessages();updateModelUI()}
-document.addEventListener("DOMContentLoaded",()=>{
-  activeChatId=chats[0]?.id||null;ensureChat();
-  $("openSidebar")?.addEventListener("click",openSidebar);$("closeSidebar")?.addEventListener("click",closeSidebar);
-  $("scrim")?.addEventListener("click",closeSidebar);$("new-chat")?.addEventListener("click",newChat);
-  $("new-chat-top")?.addEventListener("click",newChat);$("delete-chat")?.addEventListener("click",deleteCurrentChat);
-  $("load-ai")?.addEventListener("click",loadAI);
-  $("composer")?.addEventListener("submit",e=>{e.preventDefault();e.stopPropagation();sendMessage();return false});
-  $("message-input")?.addEventListener("input",autoResize);
-  $("message-input")?.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();e.stopPropagation();sendMessage()}});
+
+function newChat() {
+  const chat = {
+    id: id(),
+    title: "New chat",
+    messages: [],
+    updatedAt: Date.now()
+  };
+
+  chats.unshift(chat);
+  activeChatId = chat.id;
+
+  saveChats();
+  closeSidebar();
+  renderAll();
+
+  $("message-input")?.focus();
+}
+
+function deleteCurrentChat() {
+  if (!activeChatId) return;
+
+  chats = chats.filter(
+    chat => chat.id !== activeChatId
+  );
+
+  activeChatId = chats[0]?.id || null;
+
+  saveChats();
+
+  ensureChat();
+  renderAll();
+}
+
+function openSidebar() {
+  $("sidebar")?.classList.add("open");
+  $("scrim")?.classList.add("show");
+}
+
+function closeSidebar() {
+  $("sidebar")?.classList.remove("open");
+  $("scrim")?.classList.remove("show");
+}
+
+function autoResize() {
+  const input = $("message-input");
+
+  if (!input) return;
+
+  input.style.height = "auto";
+
+  input.style.height =
+    Math.min(input.scrollHeight, 130) + "px";
+}
+
+function renderAll() {
+  renderChats();
+  renderMessages();
+  updateAIButton();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  activeChatId = chats[0]?.id || null;
+
+  ensureChat();
+
+  $("openSidebar")?.addEventListener(
+    "click",
+    openSidebar
+  );
+
+  $("closeSidebar")?.addEventListener(
+    "click",
+    closeSidebar
+  );
+
+  $("scrim")?.addEventListener(
+    "click",
+    closeSidebar
+  );
+
+  $("new-chat")?.addEventListener(
+    "click",
+    newChat
+  );
+
+  $("new-chat-top")?.addEventListener(
+    "click",
+    newChat
+  );
+
+  $("delete-chat")?.addEventListener(
+    "click",
+    deleteCurrentChat
+  );
+
+  $("load-ai")?.addEventListener(
+    "click",
+    loadAI
+  );
+
+  $("composer")?.addEventListener(
+    "submit",
+    event => {
+      event.preventDefault();
+      sendMessage();
+    }
+  );
+
+  $("message-input")?.addEventListener(
+    "input",
+    autoResize
+  );
+
+  $("message-input")?.addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        sendMessage();
+      }
+
+    }
+  );
+
   renderAll();
 });
